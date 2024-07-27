@@ -1,0 +1,7 @@
+MyDumbEDRDLL/x64
+MyDumbEDRDriver/x64
+MyDumbEDRRemoteInjector/x64
+MyDumbEDRStaticAnalyzer/x64
+ShellcodeInject/x64
+x64/
+.vs/
