@@ -18,7 +18,7 @@ UNICODE_STRING SYM_LINK = RTL_CONSTANT_STRING(L"\\??\\MyDumbEDR");        // Sym
 This function is sending the path as well as the name of the binary being launched
 to the DumbEDRAnalyzer agent running in userland
 */
-int analyze_binary(wchar_t* binary_file_path) {
+int log_event(wchar_t* binary_file_path) {
 
     UNICODE_STRING pipeName; // String containing the name of the named
     // Initialize a UNICODE_STRING structure containing the name of the named pipe
@@ -80,45 +80,10 @@ int analyze_binary(wchar_t* binary_file_path) {
 
         DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            ZwWaitForSingleObject: 0x%0.8x\n", status);
 
-        wchar_t response[MESSAGE_SIZE] = { 0 };
-        // Reading the respons from the named pipe (ie: if the binary is malicious or not based on static analysis)
-        status = ZwReadFile(
-            hPipe,          // Handle to the named pipe
-            NULL,           // Optionally a handle on an even object
-            NULL,           // Always NULL
-            NULL,           // Always NULL
-            &io_stat_block, // Structure containing the I/O queue
-            &response,      // Buffer in which to store the answer
-            MESSAGE_SIZE,   // Maximum size of the buffer
-            NULL,           // Bytes offset (optional)
-            NULL            // Always NULL
-        );
-
-        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            ZwReadFile: 0x%0.8x\n", status);
-
-        // Waiting again for the operation to be completed
-        status = ZwWaitForSingleObject(
-            hPipe,
-            FALSE,
-            NULL
-        );
-
-        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            ZwWaitForSingleObject: 0x%0.8x\n", status);
-
-        // Used to close a connection to the named pipe
         ZwClose(
             hPipe // Handle to the named pipe
         );
-
-        if (wcscmp(response, L"OK\0") == 0) {
-            DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            StaticAnalyzer: OK\n", response);
-            return 0;
-        }
-        else {
-            DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            StaticAnalyzer: KO\n", response);
-            return 0;
-            // return 1;
-        }
+        return 0;
     }
     else {
         DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            StaticAnalyzer unreachable. Allowing.\n");
@@ -234,6 +199,9 @@ int inject_dll(int pid) {
     }
 }
 
+#define MESSAGE_SIZE 2048
+
+
 void CreateProcessNotifyRoutine(PEPROCESS parent_process, HANDLE pid, PPS_CREATE_NOTIFY_INFO createInfo) {
     UNREFERENCED_PARAMETER(parent_process);
 
@@ -242,6 +210,8 @@ void CreateProcessNotifyRoutine(PEPROCESS parent_process, HANDLE pid, PPS_CREATE
 
     PsLookupProcessByProcessId(pid, &process);
     SeLocateProcessImageName(process, &processName);
+
+    wchar_t line[MESSAGE_SIZE] = { 0 };
 
     // Never forget this if check because if you don't, you'll end up crashing your Windows system ;P
     if (createInfo != NULL) {
@@ -262,52 +232,32 @@ void CreateProcessNotifyRoutine(PEPROCESS parent_process, HANDLE pid, PPS_CREATE
         DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            DOS path: %ws\n", objFileDosDeviceName->Name.Buffer);
         DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            CommandLine: %ws\n", createInfo->CommandLine->Buffer);
 
-        // Compare the image base of the launched process to the dump_lasss string
-        if (wcsstr(createInfo->ImageFileName->Buffer, L"ShellcodeInject.exe") != NULL) {
-
-            // Checks if the notepad keyword is found in the CommandLine
-            if (wcsstr(createInfo->CommandLine->Buffer, L"notepad.exe") != NULL) {
-                DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            State: DENIED command line\n");
-                createInfo->CreationStatus = STATUS_ACCESS_DENIED;
-                return;
-            }
-
-            if (createInfo->FileOpenNameAvailable && createInfo->ImageFileName) {
-                int analyzer_ret = analyze_binary(objFileDosDeviceName->Name.Buffer);
-                if (analyzer_ret == 0) {
-                    DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            State: Sending to injector\n");
-                    int injector_ret = inject_dll((int)(intptr_t)pid);
-                    DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            State: return injector '%d'\n", injector_ret);
-
-                    if (injector_ret == 0) {
-                        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            State: PROCESS ALLOWED\n");
-                        createInfo->CreationStatus = STATUS_SUCCESS;
-                        return;
-                    }
-                    else {
-                        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            State: PROCESS DENIED\n");
-                        createInfo->CreationStatus = STATUS_ACCESS_DENIED;
-                        return;
-                    }
-                }
-                else {
-                    DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            State: Denied by StaticAnalyzer\n");
-                    createInfo->CreationStatus = STATUS_ACCESS_DENIED;
-                    return;
-                }
-            }
-        }
+        swprintf(line, L"%llu;%wZ;%llu;%wZ",
+            (unsigned __int64) pid, processName,
+            (unsigned __int64) createInfo->ParentProcessId, parent_processName);
+        log_event(line);
     }
-    // Logical bug here, if the agent is not running, the driver will always allow the creation of the process
     else {
         DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] Process %wZ killed\n", processName);
     }
 }
 
+
+void CreateThreadNotifyRoutine(HANDLE ProcessId, HANDLE ThreadId, BOOLEAN Create) {
+    if ( (uintptr_t) ProcessId == 600) {
+        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] Thread %d created\n", ThreadId);
+        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            PID: %d  %b\n", ProcessId, Create);
+    }
+}
+
+
 void UnloadMyDumbEDR(_In_ PDRIVER_OBJECT DriverObject) {
     DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "[MyDumbEDR] Unloading routine called\n");
+    
     // Unset the callback
-    PsSetCreateProcessNotifyRoutineEx((PCREATE_PROCESS_NOTIFY_ROUTINE_EX)CreateProcessNotifyRoutine, TRUE);
+    PsSetCreateProcessNotifyRoutineEx(CreateProcessNotifyRoutine, TRUE);
+    PsRemoveCreateThreadNotifyRoutine(CreateThreadNotifyRoutine);
+
     // Delete the driver device 
     IoDeleteDevice(DriverObject->DeviceObject);
     // Delete the symbolic link
@@ -355,14 +305,26 @@ NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING Regi
 
     NTSTATUS ret = PsSetCreateProcessNotifyRoutineEx(CreateProcessNotifyRoutine, FALSE);
     if (ret == STATUS_SUCCESS) {
-        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] Driver launched successfully\n");
+        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] CreateProcessNotifyRoutine launched successfully\n");
     }
     else if (ret == STATUS_INVALID_PARAMETER) {
-        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] Invalid parameter\n");
+        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] CreateProcessNotifyRoutine Invalid parameter\n");
     }
     else if (ret == STATUS_ACCESS_DENIED) {
-        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] Access denied\n");
+        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] CreateProcessNotifyRoutine Access denied\n");
     }
+
+    ret = PsSetCreateThreadNotifyRoutine(CreateThreadNotifyRoutine);
+    if (ret == STATUS_SUCCESS) {
+        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] CreateThreadNotifyRoutine launched successfully\n");
+    }
+    else if (ret == STATUS_INVALID_PARAMETER) {
+        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] CreateThreadNotifyRoutine Invalid parameter\n");
+    }
+    else if (ret == STATUS_ACCESS_DENIED) {
+        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] CreateThreadNotifyRoutine Access denied\n");
+    }
+
 
     return 0;
 }
