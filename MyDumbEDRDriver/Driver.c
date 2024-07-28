@@ -17,24 +17,22 @@ UNICODE_STRING SYM_LINK = RTL_CONSTANT_STRING(L"\\??\\MyDumbEDR");        // Sym
 HANDLE hPipe = NULL;                     // Handle that we will use to communicate with the named pipe
 
 
-int log_event(wchar_t* binary_file_path) {
+int log_event(wchar_t* message) {
     if (hPipe == NULL) {
         DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            cannot log as pipe is closed");
         return 1;
     }
-
-    DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            log_event(): %zW", binary_file_path);
-
+    NTSTATUS status;
     IO_STATUS_BLOCK io_stat_block;    // IO status block used to specify the state of a I/O request
 
-    // Now we'll send the binary path to the userland agent
-    NTSTATUS status = ZwWriteFile(
+    // Now we'll send the data path the userland agent
+    status = ZwWriteFile(
         hPipe,            // Handle to the named pipe
         NULL,             // Optionally a handle on an even object
         NULL,             // Always NULL
         NULL,             // Always NULL
         &io_stat_block,   // Structure containing the I/O queue
-        binary_file_path, // Buffer in which is stored the binary path
+        message, // Buffer in which is stored the binary path
         MESSAGE_SIZE,     // Maximum size of the buffer
         NULL,             // Bytes offset (optional)
         NULL              // Always NULL
@@ -45,6 +43,7 @@ int log_event(wchar_t* binary_file_path) {
         return 0;
     }
 
+    //DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            log_event(): %zW", message);
     status = ZwWaitForSingleObject(
         hPipe, // Handle the named pipe
         FALSE, // Whether or not we want the wait to be alertable
@@ -244,7 +243,7 @@ void CreateProcessNotifyRoutine(PEPROCESS parent_process, HANDLE pid, PPS_CREATE
         DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            DOS path: %ws\n", objFileDosDeviceName->Name.Buffer);
         DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            CommandLine: %ws\n", createInfo->CommandLine->Buffer);
 
-        swprintf(line, L"%llu;%wZ;%llu;%wZ",
+        swprintf(line, L"process:%llu;%wZ;%llu;%wZ",
             (unsigned __int64) pid, processName,
             (unsigned __int64) createInfo->ParentProcessId, parent_processName);
         log_event(line);
@@ -256,6 +255,13 @@ void CreateProcessNotifyRoutine(PEPROCESS parent_process, HANDLE pid, PPS_CREATE
 
 
 void CreateThreadNotifyRoutine(HANDLE ProcessId, HANDLE ThreadId, BOOLEAN Create) {
+    wchar_t line[MESSAGE_SIZE] = { 0 };
+    swprintf(line, L"thread:%llu;%llu;%d",
+        (unsigned __int64)ProcessId, 
+        (unsigned __int64)ThreadId,
+        Create);
+    log_event(line);
+
     if ( (uintptr_t) ProcessId == 700) {
         DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] Thread %d created\n", ThreadId);
         DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            PID: %d  %d\n", ProcessId, Create);
@@ -263,6 +269,12 @@ void CreateThreadNotifyRoutine(HANDLE ProcessId, HANDLE ThreadId, BOOLEAN Create
 }
 
 void LoadImageNotifyRoutine(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIMAGE_INFO ImageInfo) {
+    wchar_t line[MESSAGE_SIZE] = { 0 };
+    swprintf(line, L"image:%llu;%wZ",
+        (unsigned __int64)ProcessId,
+        FullImageName);
+    log_event(line);
+
     if ((uintptr_t)ProcessId == 700) {
         DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] Image %wZ created\n", FullImageName);
         DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            PID: %d\n", ProcessId);
@@ -302,6 +314,7 @@ CBTdPreOperationCallback(
     _Inout_ POB_PRE_OPERATION_INFORMATION PreInfo
 )
 {
+    // https://github.com/microsoft/Windows-driver-samples/blob/main/general/obcallback/driver/callback.c
     if (0) {
         DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] OperationCallBack %p %p\n",
             RegistrationContext, PreInfo);
