@@ -291,8 +291,10 @@ CBTdPreOperationCallback(
     _Inout_ POB_PRE_OPERATION_INFORMATION PreInfo
 )
 {
-    DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] OperationCallBack %p %p\n",
-        RegistrationContext, PreInfo);
+    if (0) {
+        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] OperationCallBack %p %p\n",
+            RegistrationContext, PreInfo);
+    }
 
     return OB_PREOP_SUCCESS;
 }
