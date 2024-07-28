@@ -53,13 +53,15 @@ int main() {
             printf("~> %ws\n", message);
             int res = 0;
         }
-
-        // Disconnect
-        DisconnectNamedPipe(
-            hServerPipe // Handle to the named pipe
-        );
-
-        printf("\n\n");
+        
     }
+
+    printf("Exit\n\n");
+
+    // Disconnect
+    DisconnectNamedPipe(
+        hServerPipe // Handle to the named pipe
+    );
+
     return 0;
 }
