@@ -44,7 +44,7 @@ int log_event(wchar_t* message) {
     }
 
     //DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            log_event(): %zW", message);
-    status = ZwWaitForSingleObject(
+    /*status = ZwWaitForSingleObject(
         hPipe, // Handle the named pipe
         FALSE, // Whether or not we want the wait to be alertable
         NULL   // An optional timeout
@@ -53,7 +53,7 @@ int log_event(wchar_t* message) {
         DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            ZwWriteFile: Error ZwWaitForSingleObject: 0x%0.8x\n", status);
         hPipe = NULL;
         return 0;
-    }
+    }*/
 
     //DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            ZwWaitForSingleObject: 0x%0.8x\n", status);
 
@@ -308,20 +308,210 @@ typedef struct _TD_CALLBACK_REGISTRATION {
     ULONG RegistrationId;        
 }
 TD_CALLBACK_REGISTRATION, *PTD_CALLBACK_REGISTRATION;
-OB_PREOP_CALLBACK_STATUS
-CBTdPreOperationCallback(
+
+
+
+#define TD_CALLBACK_REGISTRATION_TAG  '0bCO' // TD_CALLBACK_REGISTRATION structure.
+#define TD_CALL_CONTEXT_TAG           '1bCO' // TD_CALL_CONTEXT structure.
+
+typedef struct _TD_CALL_CONTEXT
+{
+    PTD_CALLBACK_REGISTRATION CallbackRegistration;
+
+    OB_OPERATION Operation;
+    PVOID Object;
+    POBJECT_TYPE ObjectType;
+}
+TD_CALL_CONTEXT, * PTD_CALL_CONTEXT;
+
+void TdSetCallContext(
+    _Inout_ POB_PRE_OPERATION_INFORMATION PreInfo,
+    _In_ PTD_CALLBACK_REGISTRATION CallbackRegistration
+)
+{
+    PTD_CALL_CONTEXT CallContext;
+
+    CallContext = (PTD_CALL_CONTEXT)ExAllocatePool2(
+        POOL_FLAG_PAGED, sizeof(TD_CALL_CONTEXT), TD_CALL_CONTEXT_TAG
+    );
+
+    if (CallContext == NULL)
+    {
+        return;
+    }
+
+    CallContext->CallbackRegistration = CallbackRegistration;
+    CallContext->Operation = PreInfo->Operation;
+    CallContext->Object = PreInfo->Object;
+    CallContext->ObjectType = PreInfo->ObjectType;
+
+    PreInfo->CallContext = CallContext;
+}
+
+
+#define CB_PROCESS_TERMINATE 0x0001
+#define CB_THREAD_TERMINATE  0x0001
+
+// Callback
+OB_PREOP_CALLBACK_STATUS CBTdPreOperationCallback(
     _In_ PVOID RegistrationContext,
     _Inout_ POB_PRE_OPERATION_INFORMATION PreInfo
 )
 {
     // https://github.com/microsoft/Windows-driver-samples/blob/main/general/obcallback/driver/callback.c
-    if (0) {
-        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] OperationCallBack %p %p\n",
-            RegistrationContext, PreInfo);
+
+    PTD_CALLBACK_REGISTRATION CallbackRegistration;
+
+    ACCESS_MASK AccessBitsToClear = 0;
+    ACCESS_MASK AccessBitsToSet = 0;
+    ACCESS_MASK InitialDesiredAccess = 0;
+    ACCESS_MASK OriginalDesiredAccess = 0;
+
+
+    PACCESS_MASK DesiredAccess = NULL;
+
+    LPCWSTR ObjectTypeName = NULL;
+    LPCWSTR OperationName = NULL;
+
+    // Not using driver specific values at this time
+    CallbackRegistration = (PTD_CALLBACK_REGISTRATION)RegistrationContext;
+
+
+    // Only want to filter attempts to access protected process
+    // all other processes are left untouched
+
+    if (PreInfo->ObjectType == *PsProcessType) {
+        //
+        // Ignore requests for processes other than our target process.
+        //
+
+        // if (TdProtectedTargetProcess != NULL &&
+        //    TdProtectedTargetProcess != PreInfo->Object)
+        /*if (TdProtectedTargetProcess != PreInfo->Object)
+        {
+            goto Exit;
+        }*/
+
+        //
+        // Also ignore requests that are trying to open/duplicate the current
+        // process.
+        //
+
+        if (PreInfo->Object == PsGetCurrentProcess()) {
+            DbgPrintEx(
+                DPFLTR_IHVDRIVER_ID, DPFLTR_TRACE_LEVEL,
+                "ObCallbackTest: CBTdPreOperationCallback: ignore process open/duplicate from the protected process itself\n");
+            goto Exit;
+        }
+
+        ObjectTypeName = L"PsProcessType";
+        AccessBitsToClear = CB_PROCESS_TERMINATE;
+        AccessBitsToSet = 0;
+    }
+    else if (PreInfo->ObjectType == *PsThreadType) {
+        HANDLE ProcessIdOfTargetThread = PsGetThreadProcessId((PETHREAD)PreInfo->Object);
+
+        //
+        // Ignore requests for threads belonging to processes other than our
+        // target process.
+        //
+
+        // if (CallbackRegistration->TargetProcess   != NULL &&
+        //     CallbackRegistration->TargetProcessId != ProcessIdOfTargetThread)
+        /*if (TdProtectedTargetProcessId != ProcessIdOfTargetThread) {
+            goto Exit;
+        }*/
+
+        //
+        // Also ignore requests for threads belonging to the current processes.
+        //
+
+        if (ProcessIdOfTargetThread == PsGetCurrentProcessId()) {
+            DbgPrintEx(
+                DPFLTR_IHVDRIVER_ID, DPFLTR_TRACE_LEVEL,
+                "ObCallbackTest: CBTdPreOperationCallback: ignore thread open/duplicate from the protected process itself\n");
+            goto Exit;
+        }
+
+        ObjectTypeName = L"PsThreadType";
+        AccessBitsToClear = CB_THREAD_TERMINATE;
+        AccessBitsToSet = 0;
+    }
+    else {
+        DbgPrintEx(
+            DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL,
+            "ObCallbackTest: CBTdPreOperationCallback: unexpected object type\n");
+        goto Exit;
     }
 
-    return OB_PREOP_SUCCESS;
+    switch (PreInfo->Operation) {
+    case OB_OPERATION_HANDLE_CREATE:
+        DesiredAccess = &PreInfo->Parameters->CreateHandleInformation.DesiredAccess;
+        OriginalDesiredAccess = PreInfo->Parameters->CreateHandleInformation.OriginalDesiredAccess;
+
+        OperationName = L"OB_OPERATION_HANDLE_CREATE";
+        break;
+
+    case OB_OPERATION_HANDLE_DUPLICATE:
+        DesiredAccess = &PreInfo->Parameters->DuplicateHandleInformation.DesiredAccess;
+        OriginalDesiredAccess = PreInfo->Parameters->DuplicateHandleInformation.OriginalDesiredAccess;
+
+        OperationName = L"OB_OPERATION_HANDLE_DUPLICATE";
+        break;
+
+    default:
+        break;
+    }
+
+    InitialDesiredAccess = *DesiredAccess;
+
+    // Filter only if request made outside of the kernel
+    if (PreInfo->KernelHandle != 1) {
+        *DesiredAccess &= ~AccessBitsToClear;
+        *DesiredAccess |= AccessBitsToSet;
+    }
+
+    //
+    // Set call context.
+    //
+
+    TdSetCallContext(PreInfo, CallbackRegistration);
+
+
+    /*DbgPrintEx(
+        DPFLTR_IHVDRIVER_ID, DPFLTR_TRACE_LEVEL, "ObCallbackTest: CBTdPreOperationCallback: PROTECTED process %p (ID 0x%p)\n",
+        TdProtectedTargetProcess,
+        (PVOID)TdProtectedTargetProcessId
+    );*/
+
+
+    DbgPrintEx(
+        DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL,
+        "ObCallbackTest: CBTdPreOperationCallback\n"
+        "    Client Id:    %p:%p\n"
+        "    Object:       %p\n"
+        "    Type:         %ls\n"
+        "    Operation:    %ls (KernelHandle=%d)\n"
+        "    OriginalDesiredAccess: 0x%x\n"
+        "    DesiredAccess (in):    0x%x\n"
+        "    DesiredAccess (out):   0x%x\n",
+        PsGetCurrentProcessId(),
+        PsGetCurrentThreadId(),
+        PreInfo->Object,
+        ObjectTypeName,
+        OperationName,
+        PreInfo->KernelHandle,
+        OriginalDesiredAccess,
+        InitialDesiredAccess,
+        *DesiredAccess
+    );
+
+    Exit:
+        return OB_PREOP_SUCCESS;
 }
+
+
+
 PVOID pCBRegistrationHandle = NULL;
 
 
