@@ -113,6 +113,14 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Driver.c" />
+    <ClCompile Include="kcallbacks.c" />
+    <ClCompile Include="pipe.c" />
+    <ClCompile Include="stuff.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="common.h" />
+    <ClInclude Include="kcallbacks.h" />
+    <ClInclude Include="pipe.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
