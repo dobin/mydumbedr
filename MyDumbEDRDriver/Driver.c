@@ -14,12 +14,45 @@
 UNICODE_STRING DEVICE_NAME = RTL_CONSTANT_STRING(L"\\Device\\MyDumbEDR"); // Internal driver device name, cannot be used userland
 UNICODE_STRING SYM_LINK = RTL_CONSTANT_STRING(L"\\??\\MyDumbEDR");        // Symlink used to reach the driver, can be used userland
 
-/*
-This function is sending the path as well as the name of the binary being launched
-to the DumbEDRAnalyzer agent running in userland
-*/
-int log_event(wchar_t* binary_file_path) {
+HANDLE hPipe;                     // Handle that we will use to communicate with the named pipe
 
+
+int log_event(wchar_t* binary_file_path) {
+    IO_STATUS_BLOCK io_stat_block;    // IO status block used to specify the state of a I/O request
+
+    // Now we'll send the binary path to the userland agent
+    NTSTATUS status = ZwWriteFile(
+        hPipe,            // Handle to the named pipe
+        NULL,             // Optionally a handle on an even object
+        NULL,             // Always NULL
+        NULL,             // Always NULL
+        &io_stat_block,   // Structure containing the I/O queue
+        binary_file_path, // Buffer in which is stored the binary path
+        MESSAGE_SIZE,     // Maximum size of the buffer
+        NULL,             // Bytes offset (optional)
+        NULL              // Always NULL
+    );
+
+    DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            ZwWriteFile: 0x%0.8x\n", status);
+
+    /*
+    This function is needed when you are running read/write files operation so that the kernel driver
+    makes sure that the reading/writing phase is done and you can keep running the code
+    */
+
+    status = ZwWaitForSingleObject(
+        hPipe, // Handle the named pipe
+        FALSE, // Whether or not we want the wait to be alertable
+        NULL   // An optional timeout
+    );
+
+    DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            ZwWaitForSingleObject: 0x%0.8x\n", status);
+
+    return 1;
+}
+
+
+int open_pipe() {
     UNICODE_STRING pipeName; // String containing the name of the named
     // Initialize a UNICODE_STRING structure containing the name of the named pipe
     RtlInitUnicodeString(
@@ -27,7 +60,6 @@ int log_event(wchar_t* binary_file_path) {
         L"\\??\\pipe\\dumbedr-analyzer" // Wide string containing the name of the named pipe
     );
 
-    HANDLE hPipe;                     // Handle that we will use to communicate with the named pipe
     OBJECT_ATTRIBUTES fattrs = { 0 }; // Objects Attributes used to store information when calling ZwCreateFile
     IO_STATUS_BLOCK io_stat_block;    // IO status block used to specify the state of a I/O request
 
@@ -51,45 +83,14 @@ int log_event(wchar_t* binary_file_path) {
 
     // If we can obtain a handle on the named pipe then 
     if (NT_SUCCESS(status)) {
-
-        // Now we'll send the binary path to the userland agent
-        status = ZwWriteFile(
-            hPipe,            // Handle to the named pipe
-            NULL,             // Optionally a handle on an even object
-            NULL,             // Always NULL
-            NULL,             // Always NULL
-            &io_stat_block,   // Structure containing the I/O queue
-            binary_file_path, // Buffer in which is stored the binary path
-            MESSAGE_SIZE,     // Maximum size of the buffer
-            NULL,             // Bytes offset (optional)
-            NULL              // Always NULL
-        );
-
-        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            ZwWriteFile: 0x%0.8x\n", status);
-
-        /*
-        This function is needed when you are running read/write files operation so that the kernel driver
-        makes sure that the reading/writing phase is done and you can keep running the code
-        */
-
-        status = ZwWaitForSingleObject(
-            hPipe, // Handle the named pipe
-            FALSE, // Whether or not we want the wait to be alertable
-            NULL   // An optional timeout
-        );
-
-        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            ZwWaitForSingleObject: 0x%0.8x\n", status);
-
-        ZwClose(
-            hPipe // Handle to the named pipe
-        );
-        return 0;
+        return 1;
     }
     else {
         DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            StaticAnalyzer unreachable. Allowing.\n");
         return 0;
     }
 }
+
 
 int inject_dll(int pid) {
     UNICODE_STRING pipeName; // String containing the name of the named
@@ -99,7 +100,7 @@ int inject_dll(int pid) {
         L"\\??\\pipe\\dumbedr-injector" // Wide string containing the name of the named pipe
     );
 
-    HANDLE hPipe;                     // Handle that we will use to communicate with the named pipe
+    HANDLE hPipe2;                     // Handle that we will use to communicate with the named pipe
     OBJECT_ATTRIBUTES fattrs = { 0 }; // Objects Attributes used to store information when calling ZwCreateFile
     IO_STATUS_BLOCK io_stat_block;    // IO status block used to specify the state of a I/O request
 
@@ -108,7 +109,7 @@ int inject_dll(int pid) {
 
     // Reads from the named pipe
     NTSTATUS status = ZwCreateFile(
-        &hPipe,                                         // Handle to the named pipe
+        &hPipe2,                                         // Handle to the named pipe
         FILE_WRITE_DATA | FILE_READ_DATA | SYNCHRONIZE, // File attribute (we need both read and write)
         &fattrs,                                        // Structure containing the file attribute
         &io_stat_block,                                 // Structure containing the I/O queue
@@ -128,7 +129,7 @@ int inject_dll(int pid) {
         swprintf_s(pid_to_inject, MESSAGE_SIZE, L"%d\0", pid);
         // Now we'll send the binary path to the userland agent
         status = ZwWriteFile(
-            hPipe,          // Handle to the named pipe
+            hPipe2,          // Handle to the named pipe
             NULL,           // Optionally a handle on an even object
             NULL,           // Always NULL
             NULL,           // Always NULL
@@ -147,7 +148,7 @@ int inject_dll(int pid) {
         */
 
         status = ZwWaitForSingleObject(
-            hPipe, // Handle the named pipe
+            hPipe2, // Handle the named pipe
             FALSE, // Whether or not we want the wait to be alertable
             NULL   // An optional timeout
         );
@@ -157,7 +158,7 @@ int inject_dll(int pid) {
         wchar_t response[MESSAGE_SIZE] = { 0 };
         // Reading the response from the named pipe (ie: if the binary is malicious or not based on static analysis)
         status = ZwReadFile(
-            hPipe,          // Handle to the named pipe
+            hPipe2,          // Handle to the named pipe
             NULL,           // Optionally a handle on an even object
             NULL,           // Always NULL
             NULL,           // Always NULL
@@ -172,7 +173,7 @@ int inject_dll(int pid) {
 
         // Waiting again for the operation to be completed
         status = ZwWaitForSingleObject(
-            hPipe,
+            hPipe2,
             FALSE,
             NULL
         );
@@ -181,7 +182,7 @@ int inject_dll(int pid) {
         
         // Used to close a connection to the named pipe
         ZwClose(
-            hPipe // Handle to the named pipe
+            hPipe2 // Handle to the named pipe
         );
         
         if (wcscmp(response, L"OK\0") == 0) {
@@ -244,19 +245,71 @@ void CreateProcessNotifyRoutine(PEPROCESS parent_process, HANDLE pid, PPS_CREATE
 
 
 void CreateThreadNotifyRoutine(HANDLE ProcessId, HANDLE ThreadId, BOOLEAN Create) {
-    if ( (uintptr_t) ProcessId == 600) {
+    if ( (uintptr_t) ProcessId == 700) {
         DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] Thread %d created\n", ThreadId);
-        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            PID: %d  %b\n", ProcessId, Create);
+        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            PID: %d  %d\n", ProcessId, Create);
+    }
+}
+
+void LoadImageNotifyRoutine(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIMAGE_INFO ImageInfo) {
+    if ((uintptr_t)ProcessId == 700) {
+        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] Image %wZ created\n", FullImageName);
+        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            PID: %d\n", ProcessId);
+        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            Image Info: %d\n", ImageInfo);
     }
 }
 
 
+/** For ObRegisterCallbacks **/
+typedef struct _TD_CALLBACK_PARAMETERS {
+    ACCESS_MASK AccessBitsToClear;
+    ACCESS_MASK AccessBitsToSet;
+}
+TD_CALLBACK_PARAMETERS, * PTD_CALLBACK_PARAMETERS;
+typedef struct _TD_CALLBACK_REGISTRATION {
+    // Handle returned by ObRegisterCallbacks.
+    PVOID RegistrationHandle;
+
+    // If not NULL, filter only requests to open/duplicate handles to this
+    // process (or one of its threads).
+    PVOID TargetProcess;
+    HANDLE TargetProcessId;
+
+    // Currently each TD_CALLBACK_REGISTRATION has at most one process and one
+    // thread callback. That is, we can't register more than one callback for
+    // the same object type with a single ObRegisterCallbacks call.
+    TD_CALLBACK_PARAMETERS ProcessParams;
+    TD_CALLBACK_PARAMETERS ThreadParams;
+
+    // Index in the global TdCallbacks array.
+    ULONG RegistrationId;        
+}
+TD_CALLBACK_REGISTRATION, *PTD_CALLBACK_REGISTRATION;
+OB_PREOP_CALLBACK_STATUS
+CBTdPreOperationCallback(
+    _In_ PVOID RegistrationContext,
+    _Inout_ POB_PRE_OPERATION_INFORMATION PreInfo
+)
+{
+    DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] OperationCallBack %p %p\n",
+        RegistrationContext, PreInfo);
+
+    return OB_PREOP_SUCCESS;
+}
+PVOID pCBRegistrationHandle = NULL;
+
+
 void UnloadMyDumbEDR(_In_ PDRIVER_OBJECT DriverObject) {
     DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "[MyDumbEDR] Unloading routine called\n");
+
+    // Handle to the named pipe
+    ZwClose(hPipe);
     
     // Unset the callback
     PsSetCreateProcessNotifyRoutineEx(CreateProcessNotifyRoutine, TRUE);
     PsRemoveCreateThreadNotifyRoutine(CreateThreadNotifyRoutine);
+    PsRemoveLoadImageNotifyRoutine(LoadImageNotifyRoutine);
+    ObUnRegisterCallbacks(pCBRegistrationHandle);
 
     // Delete the driver device 
     IoDeleteDevice(DriverObject->DeviceObject);
@@ -303,7 +356,11 @@ NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING Regi
         return status;
     }
 
-    NTSTATUS ret = PsSetCreateProcessNotifyRoutineEx(CreateProcessNotifyRoutine, FALSE);
+    open_pipe();
+
+    NTSTATUS ret;
+    // Process
+    ret = PsSetCreateProcessNotifyRoutineEx(CreateProcessNotifyRoutine, FALSE);
     if (ret == STATUS_SUCCESS) {
         DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] CreateProcessNotifyRoutine launched successfully\n");
     }
@@ -314,6 +371,7 @@ NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING Regi
         DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] CreateProcessNotifyRoutine Access denied\n");
     }
 
+    // Thread
     ret = PsSetCreateThreadNotifyRoutine(CreateThreadNotifyRoutine);
     if (ret == STATUS_SUCCESS) {
         DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] CreateThreadNotifyRoutine launched successfully\n");
@@ -323,6 +381,54 @@ NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING Regi
     }
     else if (ret == STATUS_ACCESS_DENIED) {
         DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] CreateThreadNotifyRoutine Access denied\n");
+    }
+
+    // Image
+    ret = PsSetLoadImageNotifyRoutine(LoadImageNotifyRoutine);
+    if (ret == STATUS_SUCCESS) {
+        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] LoadImageNotifyRoutine launched successfully\n");
+    }
+    else if (ret == STATUS_INVALID_PARAMETER) {
+        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] LoadImageNotifyRoutine Invalid parameter\n");
+    }
+    else if (ret == STATUS_ACCESS_DENIED) {
+        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] LoadImageNotifyRoutine Access denied\n");
+    }
+
+    // Open
+    // https://github.com/microsoft/Windows-driver-samples/blob/main/general/obcallback/driver/callback.c
+    OB_CALLBACK_REGISTRATION  CBObRegistration = { 0 };
+    UNICODE_STRING CBAltitude = { 0 };
+    RtlInitUnicodeString(&CBAltitude, L"1000");
+    TD_CALLBACK_REGISTRATION CBCallbackRegistration = { 0 };
+
+    OB_OPERATION_REGISTRATION CBOperationRegistrations[2] = { { 0 }, { 0 } };
+    CBOperationRegistrations[0].ObjectType = PsProcessType;
+    CBOperationRegistrations[0].Operations |= OB_OPERATION_HANDLE_CREATE;
+    CBOperationRegistrations[0].Operations |= OB_OPERATION_HANDLE_DUPLICATE;
+    CBOperationRegistrations[0].PreOperation = CBTdPreOperationCallback;
+    //CBOperationRegistrations[0].PostOperation = CBTdPostOperationCallback;
+
+    CBOperationRegistrations[1].ObjectType = PsThreadType;
+    CBOperationRegistrations[1].Operations |= OB_OPERATION_HANDLE_CREATE;
+    CBOperationRegistrations[1].Operations |= OB_OPERATION_HANDLE_DUPLICATE;
+    CBOperationRegistrations[1].PreOperation = CBTdPreOperationCallback;
+    //CBOperationRegistrations[1].PostOperation = CBTdPostOperationCallback;
+
+    CBObRegistration.Version = OB_FLT_REGISTRATION_VERSION;
+    CBObRegistration.OperationRegistrationCount = 2;
+    CBObRegistration.Altitude = CBAltitude;
+    CBObRegistration.RegistrationContext = &CBCallbackRegistration;
+    CBObRegistration.OperationRegistration = CBOperationRegistrations;
+    ret = ObRegisterCallbacks(&CBObRegistration, &pCBRegistrationHandle);
+    if (ret == STATUS_SUCCESS) {
+        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] ObRegister launched successfully\n");
+    }
+    else if (ret == STATUS_INVALID_PARAMETER) {
+        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] ObRegister Invalid parameter\n");
+    }
+    else if (ret == STATUS_ACCESS_DENIED) {
+        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] ObRegister Access denied\n");
     }
 
 
