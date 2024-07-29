@@ -112,6 +112,7 @@
     <FilesToPackage Include="$(TargetPath)" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="config.c" />
     <ClCompile Include="Driver.c" />
     <ClCompile Include="kcallbacks.c" />
     <ClCompile Include="pipe.c" />
@@ -119,6 +120,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="common.h" />
+    <ClInclude Include="config.h" />
     <ClInclude Include="kcallbacks.h" />
     <ClInclude Include="pipe.h" />
   </ItemGroup>

@@ -8,6 +8,7 @@
 // Needs to be set on the project properties as well
 #pragma comment(lib, "FltMgr.lib")
 
+#include "config.h"
 #include "pipe.h"
 #include "common.h"
 #include "kcallbacks.h"
@@ -28,75 +29,83 @@ void LoadKernelCallbacks() {
     NTSTATUS ret;
 
     // Process
-    ret = PsSetCreateProcessNotifyRoutineEx(CreateProcessNotifyRoutine, FALSE);
-    if (ret == STATUS_SUCCESS) {
-        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] CreateProcessNotifyRoutine launched successfully\n");
+    if (g_config.enable_processnotify) {
+        ret = PsSetCreateProcessNotifyRoutineEx(CreateProcessNotifyRoutine, FALSE);
+        if (ret == STATUS_SUCCESS) {
+            DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] CreateProcessNotifyRoutine launched successfully\n");
+        }
+        else if (ret == STATUS_INVALID_PARAMETER) {
+            DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] CreateProcessNotifyRoutine Invalid parameter\n");
+        }
+        else if (ret == STATUS_ACCESS_DENIED) {
+            DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] CreateProcessNotifyRoutine Access denied\n");
+        }
     }
-    else if (ret == STATUS_INVALID_PARAMETER) {
-        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] CreateProcessNotifyRoutine Invalid parameter\n");
-    }
-    else if (ret == STATUS_ACCESS_DENIED) {
-        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] CreateProcessNotifyRoutine Access denied\n");
-    }
-
+    
     // Thread
-    ret = PsSetCreateThreadNotifyRoutine(CreateThreadNotifyRoutine);
-    if (ret == STATUS_SUCCESS) {
-        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] CreateThreadNotifyRoutine launched successfully\n");
-    }
-    else if (ret == STATUS_INVALID_PARAMETER) {
-        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] CreateThreadNotifyRoutine Invalid parameter\n");
-    }
-    else if (ret == STATUS_ACCESS_DENIED) {
-        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] CreateThreadNotifyRoutine Access denied\n");
+    if (g_config.enable_threadnotify) {
+        ret = PsSetCreateThreadNotifyRoutine(CreateThreadNotifyRoutine);
+        if (ret == STATUS_SUCCESS) {
+            DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] CreateThreadNotifyRoutine launched successfully\n");
+        }
+        else if (ret == STATUS_INVALID_PARAMETER) {
+            DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] CreateThreadNotifyRoutine Invalid parameter\n");
+        }
+        else if (ret == STATUS_ACCESS_DENIED) {
+            DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] CreateThreadNotifyRoutine Access denied\n");
+        }
     }
 
     // Image
-    ret = PsSetLoadImageNotifyRoutine(LoadImageNotifyRoutine);
-    if (ret == STATUS_SUCCESS) {
-        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] LoadImageNotifyRoutine launched successfully\n");
-    }
-    else if (ret == STATUS_INVALID_PARAMETER) {
-        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] LoadImageNotifyRoutine Invalid parameter\n");
-    }
-    else if (ret == STATUS_ACCESS_DENIED) {
-        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] LoadImageNotifyRoutine Access denied\n");
+    if (g_config.enable_imagenotify) {
+        ret = PsSetLoadImageNotifyRoutine(LoadImageNotifyRoutine);
+        if (ret == STATUS_SUCCESS) {
+            DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] LoadImageNotifyRoutine launched successfully\n");
+        }
+        else if (ret == STATUS_INVALID_PARAMETER) {
+            DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] LoadImageNotifyRoutine Invalid parameter\n");
+        }
+        else if (ret == STATUS_ACCESS_DENIED) {
+            DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] LoadImageNotifyRoutine Access denied\n");
+        }
     }
 
     // Open
-    // https://github.com/microsoft/Windows-driver-samples/blob/main/general/obcallback/driver/callback.c
-    OB_CALLBACK_REGISTRATION  CBObRegistration = { 0 };
-    UNICODE_STRING CBAltitude = { 0 };
-    RtlInitUnicodeString(&CBAltitude, L"1000");
-    TD_CALLBACK_REGISTRATION CBCallbackRegistration = { 0 };
+    if (g_config.enable_obnotify) {
+        // https://github.com/microsoft/Windows-driver-samples/blob/main/general/obcallback/driver/callback.c
+        OB_CALLBACK_REGISTRATION  CBObRegistration = { 0 };
+        UNICODE_STRING CBAltitude = { 0 };
+        RtlInitUnicodeString(&CBAltitude, L"1000");
+        TD_CALLBACK_REGISTRATION CBCallbackRegistration = { 0 };
 
-    OB_OPERATION_REGISTRATION CBOperationRegistrations[2] = { { 0 }, { 0 } };
-    CBOperationRegistrations[0].ObjectType = PsProcessType;
-    CBOperationRegistrations[0].Operations |= OB_OPERATION_HANDLE_CREATE;
-    CBOperationRegistrations[0].Operations |= OB_OPERATION_HANDLE_DUPLICATE;
-    CBOperationRegistrations[0].PreOperation = CBTdPreOperationCallback;
-    //CBOperationRegistrations[0].PostOperation = CBTdPostOperationCallback;
+        OB_OPERATION_REGISTRATION CBOperationRegistrations[2] = { { 0 }, { 0 } };
+        CBOperationRegistrations[0].ObjectType = PsProcessType;
+        CBOperationRegistrations[0].Operations |= OB_OPERATION_HANDLE_CREATE;
+        CBOperationRegistrations[0].Operations |= OB_OPERATION_HANDLE_DUPLICATE;
+        CBOperationRegistrations[0].PreOperation = CBTdPreOperationCallback;
+        //CBOperationRegistrations[0].PostOperation = CBTdPostOperationCallback;
 
-    CBOperationRegistrations[1].ObjectType = PsThreadType;
-    CBOperationRegistrations[1].Operations |= OB_OPERATION_HANDLE_CREATE;
-    CBOperationRegistrations[1].Operations |= OB_OPERATION_HANDLE_DUPLICATE;
-    CBOperationRegistrations[1].PreOperation = CBTdPreOperationCallback;
-    //CBOperationRegistrations[1].PostOperation = CBTdPostOperationCallback;
+        CBOperationRegistrations[1].ObjectType = PsThreadType;
+        CBOperationRegistrations[1].Operations |= OB_OPERATION_HANDLE_CREATE;
+        CBOperationRegistrations[1].Operations |= OB_OPERATION_HANDLE_DUPLICATE;
+        CBOperationRegistrations[1].PreOperation = CBTdPreOperationCallback;
+        //CBOperationRegistrations[1].PostOperation = CBTdPostOperationCallback;
 
-    CBObRegistration.Version = OB_FLT_REGISTRATION_VERSION;
-    CBObRegistration.OperationRegistrationCount = 2;
-    CBObRegistration.Altitude = CBAltitude;
-    CBObRegistration.RegistrationContext = &CBCallbackRegistration;
-    CBObRegistration.OperationRegistration = CBOperationRegistrations;
-    ret = ObRegisterCallbacks(&CBObRegistration, &pCBRegistrationHandle);
-    if (ret == STATUS_SUCCESS) {
-        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] ObRegister launched successfully\n");
-    }
-    else if (ret == STATUS_INVALID_PARAMETER) {
-        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] ObRegister Invalid parameter\n");
-    }
-    else if (ret == STATUS_ACCESS_DENIED) {
-        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] ObRegister Access denied\n");
+        CBObRegistration.Version = OB_FLT_REGISTRATION_VERSION;
+        CBObRegistration.OperationRegistrationCount = 2;
+        CBObRegistration.Altitude = CBAltitude;
+        CBObRegistration.RegistrationContext = &CBCallbackRegistration;
+        CBObRegistration.OperationRegistration = CBOperationRegistrations;
+        ret = ObRegisterCallbacks(&CBObRegistration, &pCBRegistrationHandle);
+        if (ret == STATUS_SUCCESS) {
+            DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] ObRegister launched successfully\n");
+        }
+        else if (ret == STATUS_INVALID_PARAMETER) {
+            DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] ObRegister Invalid parameter\n");
+        }
+        else if (ret == STATUS_ACCESS_DENIED) {
+            DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[MyDumbEDR] ObRegister Access denied\n");
+        }
     }
 }
 
@@ -110,7 +119,9 @@ void UnloadMyDumbEDR(_In_ PDRIVER_OBJECT DriverObject) {
     PsSetCreateProcessNotifyRoutineEx(CreateProcessNotifyRoutine, TRUE);
     PsRemoveCreateThreadNotifyRoutine(CreateThreadNotifyRoutine);
     PsRemoveLoadImageNotifyRoutine(LoadImageNotifyRoutine);
-    ObUnRegisterCallbacks(pCBRegistrationHandle);
+    if (pCBRegistrationHandle != NULL) {
+        ObUnRegisterCallbacks(pCBRegistrationHandle);
+    }
 
     // Delete the driver device 
     IoDeleteDevice(DriverObject->DeviceObject);
@@ -154,6 +165,7 @@ NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING Regi
         return status;
     }
 
+    init_config();
     open_pipe();
     LoadKernelCallbacks();
 
