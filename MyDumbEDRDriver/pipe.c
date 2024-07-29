@@ -8,9 +8,12 @@
 #include "common.h"
 
 
-HANDLE hPipe = NULL;                     // Handle that we will use to communicate with the named pipe
+// Handle that we will use to communicate with the named pipe
+// To Userspace
+HANDLE hPipe = NULL;
 
 
+// log the event message
 int log_event(wchar_t* message) {
     if (hPipe == NULL) {
         DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "            cannot log as pipe is closed");
@@ -54,11 +57,14 @@ int log_event(wchar_t* message) {
     return 1;
 }
 
+
+// Close pipe
 void close_pipe() {
-    // Handle to the named pipe
     ZwClose(hPipe);
 }
 
+
+// Connect to the userspace daemon
 int open_pipe() {
     UNICODE_STRING pipeName; // String containing the name of the named
     // Initialize a UNICODE_STRING structure containing the name of the named pipe
