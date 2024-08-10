@@ -1,18 +1,10 @@
 #pragma once
 
-#include <stdio.h>
-#include <windows.h>
-#include <dbghelp.h>
-#include <wintrust.h>
-#include <Softpub.h>
-#include <wincrypt.h>
-
-
 typedef struct _config {
-	BOOL enable_processnotify;
-	BOOL enable_threadnotify;
-	BOOL enable_imagenotify;
-	BOOL enable_obnotify;
+	int enable_processnotify;
+	int enable_threadnotify;
+	int enable_imagenotify;
+	int enable_obnotify;
 } Config;
 
 
