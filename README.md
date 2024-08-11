@@ -1,3 +1,12 @@
+# MyThumbEDR
+
+Initial experimental development for RedEdr. 
+
+The relevant content has been migrated to https://github.com/dobin/RedEdr. 
+
+This is only for archive purposes.
+
+
 # MyDumbEDR 
 
 This repo contains all the necessary files to run the MyDumbEDR and try to bypass.
