@@ -19,11 +19,11 @@ pNtAllocateVirtualMemory pOriginalNtAllocateVirtualMemory = NULL;
 // NtAllocateVirtualMemory. This function takes the arguments Protect and checks
 // if the requested protection is RWX (which shouldn't happen).
 DWORD NTAPI NtAllocateVirtualMemory(
-    HANDLE ProcessHandle, 
-    PVOID* BaseAddress, 
-    ULONG_PTR ZeroBits, 
-    PSIZE_T RegionSize, 
-    ULONG AllocationType, 
+    HANDLE ProcessHandle,
+    PVOID* BaseAddress,
+    ULONG_PTR ZeroBits,
+    PSIZE_T RegionSize,
+    ULONG AllocationType,
     ULONG Protect
 ) {
 
@@ -32,6 +32,9 @@ DWORD NTAPI NtAllocateVirtualMemory(
         // If yes, we notify the user and terminate the process
         MessageBox(NULL, L"Dude, are you trying to RWX me ?", L"Found u bro", MB_OK);
         TerminateProcess(GetCurrentProcess(), 0xdeadb33f);
+    }
+    else {
+        MessageBox(NULL, L"Alloc", L"Found u bro", MB_OK);
     }
 
     //If no, we jump on the originate NtAllocateVirtualMemory
@@ -44,12 +47,14 @@ DWORD WINAPI InitHooksThread(LPVOID param) {
         return -1;
     }
 
+    MessageBox(NULL, L"INIT", L"Found u bro", MB_OK);
+
     // Here we specify which function from wich DLL we want to hook
-    MH_CreateHookApi(   
+    MH_CreateHookApi(
         L"ntdll",                                     // Name of the DLL containing the function to  hook
         "NtAllocateVirtualMemory",                    // Name of the function to hook
         NtAllocateVirtualMemory,                      // Address of the function on which to jump when hooking 
-        (LPVOID *)(&pOriginalNtAllocateVirtualMemory) // Address of the original NtAllocateVirtualMemory function
+        (LPVOID*)(&pOriginalNtAllocateVirtualMemory) // Address of the original NtAllocateVirtualMemory function
     );
 
     // Enable the hook on NtAllocateVirtualMemory
@@ -58,8 +63,8 @@ DWORD WINAPI InitHooksThread(LPVOID param) {
 }
 
 // Here is the DllMain of our DLL
-BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved){
-    switch (ul_reason_for_call){
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved) {
+    switch (ul_reason_for_call) {
     case DLL_PROCESS_ATTACH: {
         // This DLL will not be loaded by any thread so we simply disable DLL_TRHEAD_ATTACH and DLL_THREAD_DETACH
         DisableThreadLibraryCalls(hModule);

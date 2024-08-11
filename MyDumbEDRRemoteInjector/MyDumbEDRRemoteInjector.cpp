@@ -131,14 +131,18 @@ BOOL piper() {
 }
 
 
-int main() {
+int wmain(int argc, wchar_t** argv) {
+    if (argc != 2) {
+        printf("rededrinjector.exe <pid>\n");
+        return 1;
+    }
     char dll_path[] = "x64\\Debug\\MyDumbEDRDLL.dll";
     wchar_t target_binary_file[MESSAGE_SIZE] = { 0 };
 
     GetFullPathNameA(dll_path, MAX_PATH, dll_full_path, NULL);
     printf("Launching injector named pipe server, injecting %s\n", dll_full_path);
 
-    DWORD target_pid = 7000;
+    DWORD target_pid = _wtoi(argv[1]);
     printf("~> Received process id %d\n", target_pid);
     remote_inject(target_pid);
 }
